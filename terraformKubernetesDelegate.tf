@@ -377,7 +377,7 @@ resource "null_resource" "createprovider" {
 
 }
   
-#### REST CALL TTO CREATE PROVIDER  ####
+#### REST CALL TO CREATE CLOUD PROVIDER  ####
   
   depends_on = [time_sleep.sleepfordelegaetcreation]
   provisioner "local-exec" {
@@ -416,7 +416,7 @@ EOT
 
 }
 
-#### REST CALL TO CREATE TO ASSOCIATE INFRA WITH CLOUD PROVIDER   ####
+#### REST CALL TO ASSOCIATE INFRA WITH CLOUD PROVIDER   ####
 
 resource "null_resource" "associateproviderwihinfra" {
 
