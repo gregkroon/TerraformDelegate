@@ -18,7 +18,7 @@ Namely : Namespace , Cluster role binding , seecret and statefulset .
 For the cloud provider and infrstructure binding it will use the Harness config as code rest api via the Terraform local-exec and curl commands 
 (therefore curl is required in the path where this manifest is run )
 
-#### Input parameters required for provisioning 
+### Input parameters required for provisioning 
 
 harness_api_key = Create one in the Harness UI , Security->Access management->API keys 
 
