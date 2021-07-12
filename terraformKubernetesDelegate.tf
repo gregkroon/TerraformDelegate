@@ -13,7 +13,7 @@ terraform {
 
 provider "kubernetes" {
   config_path = "~/.kube/config"
-  config_context = "Your context here or it use default"
+  config_context = "Your context here or it will use default"
 }
 
 
