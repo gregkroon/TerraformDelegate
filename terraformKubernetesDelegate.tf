@@ -17,6 +17,7 @@ provider "kubernetes" {
 }
 
 
+#### INPUT VARIABLE SECTION ####
 
 variable "harness_account_id" {
   type = string
@@ -58,6 +59,9 @@ variable "harness_api_key" {
   description = "The harness api key for making rest calls to the harness api"
 }
 
+
+#### DELEGATE NAMESPACE ####
+
 resource "kubernetes_namespace" "delegatenamespace" {
   metadata {
     annotations = {
@@ -71,6 +75,8 @@ resource "kubernetes_namespace" "delegatenamespace" {
     name = "harness-delegate"
   }
 }
+
+#### DELEGATE ROLE BINDING ####
 
 resource "kubernetes_cluster_role_binding" "delegateclusterrolebinding" {
   metadata {
@@ -88,6 +94,8 @@ resource "kubernetes_cluster_role_binding" "delegateclusterrolebinding" {
   }
 }
 
+#### DELEGATE SECRET ####
+
 resource "kubernetes_secret" "delegatesecret" {
   metadata {
     name = "terraform-proxy"
@@ -101,6 +109,8 @@ resource "kubernetes_secret" "delegatesecret" {
 
   type = "Opaque"
 }
+
+#### DELEGATE STATEFULSET ####
 
 resource "kubernetes_stateful_set" "delegatesatefulset" {
   metadata {
@@ -345,6 +355,8 @@ resource "kubernetes_stateful_set" "delegatesatefulset" {
   }
 }
 
+#### DELEGATE SLEEP WAIT FOR DELEGATE TO REPORT IN ####
+
 resource "time_sleep" "sleepfordelegaetcreation" {
   depends_on = [kubernetes_stateful_set.delegatesatefulset]
 
@@ -364,6 +376,9 @@ resource "null_resource" "createprovider" {
   delegate_name = var.delegate_name
 
 }
+  
+#### REST CALL TTO CREATE PROVIDER  ####
+  
   depends_on = [time_sleep.sleepfordelegaetcreation]
   provisioner "local-exec" {
       command = <<EOT
@@ -401,7 +416,7 @@ EOT
 
 }
 
-
+#### REST CALL TO CREATE TO ASSOCIATE INFRA WITH CLOUD PROVIDER   ####
 
 resource "null_resource" "associateproviderwihinfra" {
 
