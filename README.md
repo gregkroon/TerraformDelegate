@@ -1,4 +1,4 @@
-# TerraformDelegate
+# TerraformDelegateAutomation
 
 ### Introduction 
 MVP Terraform manifest for provisioning a delegate , cloud provider and infrastructure .
