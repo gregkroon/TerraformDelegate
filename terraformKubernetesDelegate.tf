@@ -2,18 +2,18 @@ terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = "3.52.0"
+      version = "4.31.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = ">= 2.0.1"
+      version = ">= 2.12.1"
     }
   }
 }
 
 provider "kubernetes" {
   config_path = "~/.kube/config"
-  config_context = "Your context here or it will use default"
+  config_context = "${var.kubectl_config_context}"
 }
 
 
@@ -24,41 +24,26 @@ variable "harness_account_id" {
   description = "Harness SAAS account id"
 }
 
-variable "harness_account_secret" {
+variable "harness_delegate_token" {
   type = string
-  description = "Harness SAAS account secret"
+  description = "Harness SAAS delegate token"
 }
 
 variable "delegate_name" {
   type = string
-  description = "The name by which to identify the delegate in Harness"
+  description = "Delegate Name"
 }
 
-variable "cloud_provider_name" {
+
+variable "delegate_namespace" {
   type = string
-   description = "The name of the cloud provider that will be created and associated with the delegate"
+  description = "Delegate Namespace"
 }
 
-variable "application_name" {
+variable "kubectl_config_context" {
   type = string
-  description = "The application name that will associate its environment infrastructure with the cloud provider"
+  description = "Config context name inside the kubeconfig file"
 }
-
-variable "environment_name" {
-  type = string
-  description = "The application environment name that will associate its infrastructure with the cloud provider"
-}
-
-variable "infrastructure_name" {
-  type = string
-  description = "The infrastructure name that will associate itself with the cloud provider"
-}
-
-variable "harness_api_key" {
-  type = string
-  description = "The harness api key for making rest calls to the harness api"
-}
-
 
 #### DELEGATE NAMESPACE ####
 
@@ -72,7 +57,7 @@ resource "kubernetes_namespace" "delegatenamespace" {
       mylabel = ""
     }
 
-    name = "harness-delegate"
+    name = "${var.delegate_namespace}"
   }
 }
 
@@ -80,17 +65,17 @@ resource "kubernetes_namespace" "delegatenamespace" {
 
 resource "kubernetes_cluster_role_binding" "delegateclusterrolebinding" {
   metadata {
-    name = "harness-delegate-cluster-admin"
+    name = "harness-delegate-ng-cluster-admin"
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "default"
+    namespace = "${var.delegate_namespace}"
   }
   role_ref {
     api_group = "rbac.authorization.k8s.io"
     kind      = "ClusterRole"
     name      = "cluster-admin"
-  }
-  subject {
-    kind      = "ServiceAccount"
-    name      = "default"
-    namespace = "harness-delegate"
   }
 }
 
@@ -98,8 +83,8 @@ resource "kubernetes_cluster_role_binding" "delegateclusterrolebinding" {
 
 resource "kubernetes_secret" "delegatesecret" {
   metadata {
-    name = "terraform-proxy"
-    namespace = "harness-delegate"
+    name = "${var.delegate_name}-proxy"
+    namespace = "${var.delegate_namespace}"
   }
 
   data = {
@@ -110,6 +95,7 @@ resource "kubernetes_secret" "delegatesecret" {
   type = "Opaque"
 }
 
+
 #### DELEGATE STATEFULSET ####
 
 resource "kubernetes_stateful_set" "delegatesatefulset" {
@@ -118,23 +104,20 @@ resource "kubernetes_stateful_set" "delegatesatefulset" {
     }
 
     labels = {
-      "harness.io/app" = "harness-delegate"
-      "harness.io/account" = "keefxs"
-      "harness.io/name" = var.delegate_name
+      "harness.io/name" = "${var.delegate_name}"
     }
 
-    name = "${var.delegate_name}-keefxs"
-    namespace = "harness-delegate"
+    name = "${var.delegate_name}"
+    namespace = "${var.delegate_namespace}"
   }
 
   spec {
-    replicas = 1
+    replicas = 2
+    pod_management_policy = "Parallel"
 
     selector {
       match_labels = {
-        "harness.io/app" = "harness-delegate"
-        "harness.io/account" = "keefxs"
-        "harness.io/name" = var.delegate_name
+        "harness.io/name" = "${var.delegate_name}"
       }
     }
 
@@ -143,9 +126,7 @@ resource "kubernetes_stateful_set" "delegatesatefulset" {
     template {
       metadata {
         labels = {
-          "harness.io/app" = "harness-delegate"
-          "harness.io/account" = "keefxs"
-          "harness.io/name" = var.delegate_name
+          "harness.io/name" = "${var.delegate_name}"
         }
         
       }
@@ -160,8 +141,12 @@ resource "kubernetes_stateful_set" "delegatesatefulset" {
          
           resources {
             limits = {
-              cpu    = "1"
-              memory = "8Gi"
+              cpu    = "0.5"
+              memory = "2048Mi"
+            }
+            requests = {
+              cpu    = "0.5"
+              memory = "2048Mi"
             }
           }
            readiness_probe {
@@ -170,7 +155,7 @@ resource "kubernetes_stateful_set" "delegatesatefulset" {
             }
 
             initial_delay_seconds = 20
-            timeout_seconds       = 10
+            period_seconds       = 10
           }
 
           liveness_probe {
@@ -179,18 +164,26 @@ resource "kubernetes_stateful_set" "delegatesatefulset" {
             }
 
             initial_delay_seconds = 240
-            timeout_seconds       = 10
+            period_seconds       = 10
             failure_threshold      = 2
           }
          
+
+
+          env {
+              name = "JAVA_OPTS"
+              value = "-Xms64M"
+            }
+
+
           env {
               name = "ACCOUNT_ID"
               value = var.harness_account_id
             }
           
           env {
-              name = "ACCOUNT_SECRET"
-              value = var.harness_account_secret
+              name = "DELEGATE_TOKEN"
+              value = var.harness_delegate_token
             }
 
           env {
@@ -205,6 +198,13 @@ resource "kubernetes_stateful_set" "delegatesatefulset" {
            name = "WATCHER_CHECK_LOCATION"
            value = "current.version"
           }
+
+          env{
+           name = "DELEGATE_STORAGE_URL"
+           value = "https://app.harness.io"
+          }
+
+
           env{
            name = "REMOTE_WATCHER_URL_CDN"
            value = "https://app.harness.io/public/shared/watchers/builds"
@@ -213,10 +213,32 @@ resource "kubernetes_stateful_set" "delegatesatefulset" {
            name = "DELEGATE_CHECK_LOCATION"
            value = "delegatefree.txt"
           }
+
           env {
             name = "DEPLOY_MODE"
-           value = "KUBERNETES"   
+            value = "KUBERNETES"   
           }
+
+          env {
+            name = "INIT_SCRIPT"
+            value = ""   
+          }
+
+          env {
+            name = "DELEGATE_DESCRIPTION"
+            value = ""   
+          }
+
+          env {
+            name = "DELEGATE_TAGS"
+            value = ""   
+          }
+
+          env {
+            name = "NEXT_GEN"
+            value = "true"   
+          }
+
           env {
            name = "DELEGATE_NAME"
            value = var.delegate_name
@@ -255,7 +277,7 @@ resource "kubernetes_stateful_set" "delegatesatefulset" {
            name = "PROXY_USER"
            value_from {
             secret_key_ref {
-              name = "terraform-proxy"
+              name = "${var.delegate_name}-proxy"
               key = "PROXY_USER"
             }
            }
@@ -264,34 +286,19 @@ resource "kubernetes_stateful_set" "delegatesatefulset" {
           name = "PROXY_PASSWORD"
           value_from {
             secret_key_ref {
-              name = "terraform-proxy"
+              name = "${var.delegate_name}-proxy"
               key = "PROXY_PASSWORD"
             }
           }
          }
-         env {
-          name = "POLL_FOR_TASKS"
-          value = "false"
-         }
-         env {
-          name = "HELM_DESIRED_VERSION"
-          value = ""
-         }
-         env {
-          name = "CF_PLUGIN_HOME"
-          value = ""
-         }
-         env {
-          name = "USE_CDN"
-          value = "true"
-         }
+         
          env {
           name = "CDN_URL"
           value = "https://app.harness.io"
          }
          env {
           name = "JRE_VERSION"
-          value = "1.8.0_242"
+          value = "11.0.14"
          }
          env {
           name = "HELM3_PATH"
@@ -301,22 +308,12 @@ resource "kubernetes_stateful_set" "delegatesatefulset" {
           name = "HELM_PATH"
           value = ""
          }
-         env {
-          name = "CF_CLI6_PATH"
-          value = ""
-         }
-         env {
-          name = "CF_CLI7_PATH"
-          value = ""
-         }
+      
          env {
           name = "KUSTOMIZE_PATH"
           value = ""
          }
-         env {
-          name = "OC_PATH"
-          value = ""
-         }
+    
          env {
           name = "KUBECTL_PATH"
           value = ""
@@ -327,11 +324,11 @@ resource "kubernetes_stateful_set" "delegatesatefulset" {
          }
          env {
           name = "GRPC_SERVICE_ENABLED"
-          value = "false"
+          value = "true"
          }
          env {
           name = "GRPC_SERVICE_CONNECTOR_PORT"
-          value = "0"
+          value = "8080"
          }
          env {
           name = "CLIENT_TOOLS_DOWNLOAD_DISABLED"
@@ -353,106 +350,28 @@ resource "kubernetes_stateful_set" "delegatesatefulset" {
   }
 }
   }
-}
+}  
 
-#### DELEGATE SLEEP WAIT FOR DELEGATE TO REPORT IN ####
+#### DELEGATE SERVICE ####
 
-resource "time_sleep" "sleepfordelegaetcreation" {
-  depends_on = [kubernetes_stateful_set.delegatesatefulset]
+resource "kubernetes_service" "delegateservice" {
+  metadata {
+    name = "delegate-service"
+    namespace = "${var.delegate_namespace}"
 
-  create_duration = "3m"
-}
-
-
-resource "null_resource" "createprovider" {
-
- triggers = {
-  harness_account_id =  var.harness_account_id
-  cloud_provider_name = var.cloud_provider_name
-  harness_api_key = var.harness_api_key
-  application_name = var.application_name
-  environment_name =  var.environment_name
-  infrastructure_name = var.infrastructure_name
-  delegate_name = var.delegate_name
-
-}
-  
-#### REST CALL TO CREATE CLOUD PROVIDER  ####
-  
-  depends_on = [time_sleep.sleepfordelegaetcreation]
-  provisioner "local-exec" {
-      command = <<EOT
-        curl --location --request POST 'https://app.harness.io/gateway/api/setup-as-code/yaml/upsert-entity?accountId=${self.triggers.harness_account_id}&yamlFilePath=Setup/Cloud%20Providers/${self.triggers.cloud_provider_name}.yaml' \
---header 'accept: application/json, text/plain, */*' \
---header 'x-api-key: ${self.triggers.harness_api_key}' \
---form 'yamlContent="harnessApiVersion: '1.0'
-type: KUBERNETES_CLUSTER
-delegateSelectors:
-- ${self.triggers.delegate_name}-keefxs-0
-skipValidation: false
-usageRestrictions:
-  appEnvRestrictions:
-  - appFilter:
-      filterType: ALL
-    envFilter:
-      filterTypes:
-      - PROD
-  - appFilter:
-      filterType: ALL
-    envFilter:
-      filterTypes:
-      - NON_PROD
-useKubernetesDelegate: true"'
-EOT
   }
-  provisioner "local-exec" {
-    when = destroy
-      command = <<EOT
-        curl -v --request DELETE 'https://app.harness.io/gateway/api/setup-as-code/yaml/delete-entities?accountId=${self.triggers.harness_account_id}&filePaths=Setup/Cloud%20Providers/${self.triggers.cloud_provider_name}.yaml' \
---header 'accept: application/json, text/plain, */*' \
---header 'x-api-key: ${self.triggers.harness_api_key}'
-EOT
-  }
-
-}
-
-#### REST CALL TO ASSOCIATE INFRA WITH CLOUD PROVIDER   ####
-
-resource "null_resource" "associateproviderwihinfra" {
-
-  triggers = {
-  harness_account_id = var.harness_account_id
-  cloud_provider_name = var.cloud_provider_name
-  harness_api_key = var.harness_api_key
-  application_name = var.application_name
-  environment_name =  var.environment_name
-  infrastructure_name = var.infrastructure_name
-
-}
+  spec {
+    selector = {
+      "harness.io/name" = "${var.delegate_name}"
+    }
   
-  depends_on = [null_resource.createprovider]
-  provisioner "local-exec" {
-      command = <<EOT
-        curl --location --request POST 'https://app.harness.io/gateway/api/setup-as-code/yaml/upsert-entity?accountId=${self.triggers.harness_account_id}&yamlFilePath=Setup/Applications/${self.triggers.application_name}/Environments/${self.triggers.environment_name}/Infrastructure%20Definitions/${self.triggers.infrastructure_name}.yaml' \
---header 'accept: application/json, text/plain, */*' \
---header 'x-api-key: ${self.triggers.harness_api_key}' \
---form 'yamlContent="harnessApiVersion: '1.0'
-type: INFRA_DEFINITION
-cloudProviderType: KUBERNETES_CLUSTER
-deploymentType: KUBERNETES
-infrastructure:
-- type: DIRECT_KUBERNETES
-  cloudProviderName: ${self.triggers.cloud_provider_name}
-  namespace: default
-  releaseName: release-$${infra.kubernetes.infraId}"'
-EOT
-  }
-  provisioner "local-exec" {
-    when = destroy
-      command = <<EOT
-        curl -v --request DELETE 'https://app.harness.io/gateway/api/setup-as-code/yaml/delete-entities?accountId=${self.triggers.harness_account_id}&filePaths=Setup/Applications/${self.triggers.application_name}/Environments/${self.triggers.environment_name}/Infrastructure%20Definitions/${self.triggers.infrastructure_name}.yaml' \
---header 'accept: application/json, text/plain, */*' \
---header 'x-api-key: ${self.triggers.harness_api_key}'
-EOT
+    port {
+      port = 8080
+    }
+
+    type = "ClusterIP"
+
+    
+      
   }
 }
